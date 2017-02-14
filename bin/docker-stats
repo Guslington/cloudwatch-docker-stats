@@ -11,8 +11,7 @@ if ENV['LOG_VEBOSE'] == 'true'
 end
 
 def main
-  # Commama delimeted string of containers to monitor
-  containers = ENV['CONTAINERS'].split(',') || []
+  containers = ENV['CONTAINERS'].split(',') || [] # Commama delimeted string of containers to monitor
   environment_name = ENV['ENVIRONMENT'] || nil
 
   cw_region = ENV['CLOUDWATCH_REGION'] || 'ap-southeast-2'
@@ -22,25 +21,32 @@ def main
   Aws.config.update({region: cw_region})
   cw_client = Aws::CloudWatch::Client.new()
 
+  $logger.info("Starting CloudWatch docker stats collector")
+
   while true
     metric_data =[]
     containers.each do |container|
       container_info = get_container_info(container)
-      $logger.debug("#{container} status: #{container_info['State']['Status']}")
-      status = get_container_status(container_info)
-      metric_data << create_metric_data(containers, status, container_info, environment_name)
+      status = (container_info ? get_container_status(container,container_info) : 0)
+      metric_data << create_metric_data(container, status, container_info, environment_name)
     end
-    publish_queue_stats(cw_client, cw_namespace, metric_data)
+    publish_docker_stats(cw_client, cw_namespace, metric_data)
     sleep cw_interval.to_i
   end
 
 end
 
 def get_container_info(container)
-  Docker::Container.get(container).info
+  begin
+    Docker::Container.get(container).info
+  rescue Docker::Error::NotFoundError
+    $logger.warn("No such container: #{container}")
+    return false
+  end
 end
 
-def get_container_status(container_info)
+def get_container_status(container,container_info)
+  $logger.debug("#{container} status: #{container_info['State']['Status']}")
   container_info['State']['Running'] == true ? 1 : 0
 end
 
